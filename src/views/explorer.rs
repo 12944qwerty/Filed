@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::time::{SystemTime};
 
 use iced::widget::scrollable::{Id, RelativeOffset};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Column, Container};
-use iced::{event, window, Color, Element, Event, Length, Padding, Size, Subscription, Task, Theme};
+use iced::widget::{column, container, mouse_area, row, scrollable, text, Column, Image, Space};
+use iced::{event, window, Color, Element, Event, Length, Padding, Size, Subscription, Task};
 
-use crate::utils::{readable_size, readable_time};
+use crate::utils::{file_type_from_extension, image_from_type, readable_size, readable_time};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum FileType {
@@ -16,6 +16,8 @@ pub enum FileType {
     Video,
     Audio,
     Document,
+
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +33,7 @@ pub struct FileItem {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    HighlightFile(String),
+    HighlightFile(FileItem),
     SelectFile(FileItem),
     OpenFile(FileItem),
 
@@ -76,13 +78,7 @@ fn load_tree(path: String) -> Task<Message> {
                         file_type: if is_dir {
                             Some(FileType::Directory)
                         } else {
-                            match path.extension().and_then(|s| s.to_str()) {
-                                Some("png") => Some(FileType::Image),
-                                Some("mp4") => Some(FileType::Video),
-                                Some("mp3") => Some(FileType::Audio),
-                                Some("pdf") => Some(FileType::Document),
-                                _ => Some(FileType::File),
-                            }
+                            Some(file_type_from_extension(path.extension().and_then(|s| s.to_str()).unwrap_or("")))
                         }
                     }
                 })
@@ -140,8 +136,8 @@ impl Explorer {
                 self.tree = Some(tree);
                 Task::none()
             }
-            Message::HighlightFile(name) => {
-                println!("Highlighted file: {}", name);
+            Message::HighlightFile(item) => {
+                self.highlighted_file = Some(item.name.clone());
                 Task::none()
             }
             Message::OpenFile(item) => {
@@ -168,8 +164,6 @@ impl Explorer {
     pub fn view(&self) -> Element<Message> {
         let mut col = Column::new().spacing(5);
 
-        col = col.push(text(format!("{}", self.current_path.to_string_lossy().to_string())));
-
         let mut tree = self.tree.clone().unwrap_or(vec![]);
         tree.insert(0, FileItem {
             name: "..".to_owned(),
@@ -181,19 +175,29 @@ impl Explorer {
             file_type: Some(FileType::Directory),
         });
 
+
         for item in tree {
             col = col.push(
                 mouse_area(
                     container(
                         row![
+                            container(
+                                Image::new(image_from_type(item.clone().file_type.unwrap_or(FileType::File)))
+                                    .width(14)
+                                    .height(14)
+                            )
+                                .padding(Padding::default().top(3)),
                             text(format!("{}", item.name))
-                                .width(Length::Fill)
+                                .width(Length::FillPortion(4))
                                 .size(14),
                             text(if !item.is_dir { readable_size(item.size.unwrap_or(0)) } else { "-".to_owned() })
-                                .width(Length::Fill)
+                                .width(Length::FillPortion(1))
                                 .size(14),
                             text(readable_time(item.created))
-                                .width(Length::Fill)
+                                .width(Length::FillPortion(2))
+                                .size(14),
+                            text(readable_time(item.last_modified))
+                                .width(Length::FillPortion(2))
                                 .size(14),
                         ]
                             .spacing(5)
@@ -201,31 +205,37 @@ impl Explorer {
                         .padding(5)
                         .style(if self.highlighted_file.as_ref() == Some(&item.name) {
                             |_: &_| iced::widget::container::Style {
-                                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.001).into()),
+                                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
                                 ..Default::default()
                             }
                         } else {
                             |_: &_| iced::widget::container::Style {
-                                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.005).into()),
+                                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.02).into()),
                                 ..Default::default()
                             }
                         })
                 )
-                    .on_press(Message::SelectFile(item))
+                    .on_press(Message::HighlightFile(item.clone()))
+                    .on_double_click(Message::SelectFile(item))
                     
             );
         }
 
         row![
             self.sidebar(),
-            scrollable(col)
-                .width(self.width.unwrap_or(200.0) - 200.0)
-                .id(Id::new("explorer"))
-                // .height(Length::Fill)
+            column![
+                container(self.header())
+                    .width(self.width.unwrap_or(200.0) - 200.0),
+                scrollable(col.padding(5))
+                    .width(self.width.unwrap_or(200.0) - 200.0)
+                    .id(Id::new("explorer"))
+                    // .height(Length::Fill)
+            ]
+                .spacing(5),
         ]
-        .padding(10)
-        .spacing(10)
-        .into()
+            .padding(10)
+            .spacing(10)
+            .into()
     }
 
     pub fn sidebar(&self) -> Element<Message> {
@@ -239,6 +249,31 @@ impl Explorer {
         scrollable(sidebar)
             .width(200)
             .height(Length::Fill)
+            .into()
+    }
+
+    pub fn header(&self) -> Element<Message> {
+        column![
+            text(self.current_path.to_string_lossy().to_string()),
+            row![
+                Space::with_width(17),
+                text("Name")
+                    .width(Length::FillPortion(4))
+                    .size(14),
+                text("Size")
+                    .width(Length::FillPortion(1))
+                    .size(14),
+                text("Created at")
+                    .width(Length::FillPortion(2))
+                    .size(14),
+                text("Last Modified")
+                    .width(Length::FillPortion(2))
+                    .size(14),
+            ]
+                .spacing(5)
+                .padding([0, 5])
+        ]
+            .spacing(5)
             .into()
     }
 

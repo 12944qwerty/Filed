@@ -1,5 +1,6 @@
 mod views;
 mod utils;
+mod widgets;
 
 use iced::font::Font;
 use iced::widget::{row, text};
@@ -7,18 +8,17 @@ use iced::{Element, Subscription, Task, Theme};
 
 use crate::views::explorer;
 use crate::views::View;
-use crate::views::FileItem;
 
 pub fn main() -> iced::Result {
-    iced::application(Filed::title, Filed::update, Filed::view)
+    iced::application(Filed::new, Filed::update, Filed::view)
         .subscription(Filed::subscription)
-        // .title(Filed::title)
+        .title(Filed::title)
         .theme(Filed::theme)
         .settings(iced::Settings {
             default_font: Font::with_name("Fantasy"),
             ..iced::Settings::default()
         })
-        .run_with(Filed::new)
+        .run()
 }
 
 #[derive(Debug, Clone)]
@@ -37,7 +37,6 @@ impl Filed {
             Self {
                 view: View::Loading,
             },
-            // Task that loads from example_files.json file
             Task::perform(
                 async {
                     // Simulate loading
