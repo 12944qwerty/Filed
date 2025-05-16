@@ -1,8 +1,8 @@
-use std::{path::{Path, PathBuf}, time::SystemTime};
+use std::time::SystemTime;
 
 use chrono::{DateTime, Local, Duration};
 
-use crate::views::explorer::FileType;
+use crate::widgets::fileitem::FileType;
 
 pub fn readable_size(size: u64) -> String {
     let mut size = size as f64;

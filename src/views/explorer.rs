@@ -1,50 +1,25 @@
 use std::path::{PathBuf};
-use std::time::{SystemTime};
 
 use iced::widget::scrollable::{Id, RelativeOffset};
-use iced::widget::{column, container, mouse_area, row, scrollable, text, Column, Image, Space};
-use iced::{event, window, Color, Element, Event, Length, Padding, Size, Subscription, Task};
+use iced::widget::{scrollable, Column, text, row, column, container, Space};
+use iced::{event, window, Color, Element, Event, Length, Size, Subscription, Task};
 
-use crate::utils::{file_type_from_extension, image_from_type, readable_size, readable_time};
-
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub enum FileType {
-    Directory,
-
-    File,
-    Image,
-    Video,
-    Audio,
-    Document,
-
-    Unknown,
-}
-
-#[derive(Debug, Clone)]
-pub struct FileItem {
-    pub name: String,
-    pub path: PathBuf,
-    pub is_dir: bool,
-    pub size: Option<u64>,
-    pub last_modified: Option<SystemTime>,
-    pub created: Option<SystemTime>,
-    pub file_type: Option<FileType>,
-}
+use crate::widgets::fileitem::{FileItem, FileData};
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    HighlightFile(FileItem),
-    SelectFile(FileItem),
-    OpenFile(FileItem),
+    HighlightFile(FileData),
+    SelectFile(FileData),
+    OpenFile(FileData),
 
-    LoadTree(Vec<FileItem>),
+    LoadTree(Vec<FileData>),
     EventOccurred(Event),
     WindowResized(Size),
 }
 
 pub struct Explorer {
     current_path: PathBuf,
-    tree: Option<Vec<FileItem>>,
+    tree: Option<Vec<FileData>>,
 
     highlighted_file: Option<String>,
 
@@ -60,28 +35,7 @@ fn load_tree(path: String) -> Task<Message> {
                 .into_iter()
                 .flatten()
                 .filter_map(Result::ok)
-                .map(|entry| {
-                    let path = entry.path();
-                    let name = path.file_name().unwrap().to_string_lossy().to_string();
-                    let is_dir = path.is_dir();
-                    let metadata = path.metadata().unwrap();
-                    let created = metadata.created().ok();
-                    let last_modified = metadata.modified().ok();
-                    let size = if is_dir { None } else { Some(path.metadata().unwrap().len()) };
-                    FileItem {
-                        name,
-                        path: path.clone(),
-                        is_dir,
-                        size,
-                        last_modified,
-                        created,
-                        file_type: if is_dir {
-                            Some(FileType::Directory)
-                        } else {
-                            Some(file_type_from_extension(path.extension().and_then(|s| s.to_str()).unwrap_or("")))
-                        }
-                    }
-                })
+                .map(FileData::new)
                 .collect::<Vec<_>>();
             files
                 .sort_by_key(|i| !i.is_dir);
@@ -162,62 +116,18 @@ impl Explorer {
     }
 
     pub fn view(&self) -> Element<Message> {
-        let mut col = Column::new().spacing(5);
+        let mut col: Column<'_, Message> = Column::new().spacing(5);
 
         let mut tree = self.tree.clone().unwrap_or(vec![]);
-        tree.insert(0, FileItem {
-            name: "..".to_owned(),
-            path: self.current_path.parent().unwrap_or(&PathBuf::from("C:\\")).to_path_buf(),
-            is_dir: true,
-            size: None,
-            last_modified: None,
-            created: None,
-            file_type: Some(FileType::Directory),
-        });
+        tree.insert(0, FileData::parent(self.current_path.clone()));
 
 
-        for item in tree {
+        for data in tree {
             col = col.push(
-                mouse_area(
-                    container(
-                        row![
-                            container(
-                                Image::new(image_from_type(item.clone().file_type.unwrap_or(FileType::File)))
-                                    .width(14)
-                                    .height(14)
-                            )
-                                .padding(Padding::default().top(3)),
-                            text(format!("{}", item.name))
-                                .width(Length::FillPortion(4))
-                                .size(14),
-                            text(if !item.is_dir { readable_size(item.size.unwrap_or(0)) } else { "-".to_owned() })
-                                .width(Length::FillPortion(1))
-                                .size(14),
-                            text(readable_time(item.created))
-                                .width(Length::FillPortion(2))
-                                .size(14),
-                            text(readable_time(item.last_modified))
-                                .width(Length::FillPortion(2))
-                                .size(14),
-                        ]
-                            .spacing(5)
-                    )
-                        .padding(5)
-                        .style(if self.highlighted_file.as_ref() == Some(&item.name) {
-                            |_: &_| iced::widget::container::Style {
-                                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.06).into()),
-                                ..Default::default()
-                            }
-                        } else {
-                            |_: &_| iced::widget::container::Style {
-                                background: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.02).into()),
-                                ..Default::default()
-                            }
-                        })
-                )
-                    .on_press(Message::HighlightFile(item.clone()))
-                    .on_double_click(Message::SelectFile(item))
-                    
+                FileItem::from(data.clone())
+                    .is_highlighted(self.highlighted_file.clone().unwrap_or("".to_string()) == data.name)
+                    .on_select(Box::new(Message::SelectFile))
+                    .on_open(Box::new(Message::OpenFile))
             );
         }
 
@@ -258,15 +168,19 @@ impl Explorer {
             row![
                 Space::with_width(17),
                 text("Name")
+                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
                     .width(Length::FillPortion(4))
                     .size(14),
                 text("Size")
+                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
                     .width(Length::FillPortion(1))
                     .size(14),
                 text("Created at")
+                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
                     .width(Length::FillPortion(2))
                     .size(14),
                 text("Last Modified")
+                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
                     .width(Length::FillPortion(2))
                     .size(14),
             ]
