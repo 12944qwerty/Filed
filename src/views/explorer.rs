@@ -1,16 +1,18 @@
 use std::path::{PathBuf};
 
+use iced::widget::button::Style;
 use iced::widget::scrollable::{Id, RelativeOffset};
-use iced::widget::{scrollable, Column, text, row, column, container, Space};
+use iced::widget::{button, column, container, row, scrollable, text, Column, Space};
 use iced::{event, window, Color, Element, Event, Length, Size, Subscription, Task};
 
 use crate::widgets::fileitem::{FileItem, FileData};
+use crate::platform::Platform;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    HighlightFile(FileData),
     SelectFile(FileData),
     OpenFile(FileData),
+    History(bool),
 
     LoadTree(Vec<FileData>),
     EventOccurred(Event),
@@ -25,9 +27,12 @@ pub struct Explorer {
 
     width: Option<f32>,
     height: Option<f32>,
+
+    history: Vec<PathBuf>,
+    history_index: usize,
 }
 
-fn load_tree(path: String) -> Task<Message> {
+fn load_tree(path: PathBuf) -> Task<Message> {
     Task::perform(
         async {
             let mut files = std::fs::read_dir(path)
@@ -35,7 +40,7 @@ fn load_tree(path: String) -> Task<Message> {
                 .into_iter()
                 .flatten()
                 .filter_map(Result::ok)
-                .map(FileData::new)
+                .map(|e| { FileData::new(e.path()) })
                 .collect::<Vec<_>>();
             files
                 .sort_by_key(|i| !i.is_dir);
@@ -50,17 +55,19 @@ impl Explorer {
     pub fn new() -> (Self, Task<Message>) {
         (
             Self {
-                current_path: PathBuf::from("C:\\"),
+                current_path: Platform::home_dir(),
                 tree: None,
                 highlighted_file: None,
                 width: None,
                 height: None,
+                history: vec![Platform::home_dir()],
+                history_index: 0,
             },
             Task::batch(vec![
                 window::get_oldest().and_then(window::get_size).map(|size| {
                     Message::WindowResized(size)
                 }),
-                load_tree("C:\\".to_owned()),
+                load_tree(Platform::home_dir()),
             ])
         )
     }
@@ -71,8 +78,10 @@ impl Explorer {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::SelectFile(item) => {
+            Message::OpenFile(item) => {
                 if !item.is_dir {
+                    Task::none()
+                } else if self.current_path == item.path {
                     Task::none()
                 } else {
                     if item.name == ".." {
@@ -80,22 +89,39 @@ impl Explorer {
                     } else {
                         self.current_path = item.path.clone();
                     }
+                    self.history.truncate(self.history_index + 1);
+                    self.history.push(self.current_path.clone());
+                    self.history_index += 1;
+
                     Task::batch(vec![
-                        load_tree(item.path.to_string_lossy().to_string()),
+                        load_tree(item.path),
                         scrollable::snap_to(Id::new("explorer"), RelativeOffset { x: 0.0, y: 0.0 }),
                     ])
                 }
+            }
+            Message::History(forward) => {
+                if forward {
+                    if self.history_index < self.history.len() - 1 {
+                        self.history_index += 1;
+                        self.current_path = self.history[self.history_index].clone();
+                    }
+                } else {
+                    if self.history_index > 0 {
+                        self.history_index -= 1;
+                        self.current_path = self.history[self.history_index].clone();
+                    }
+                }
+                Task::batch(vec![
+                    load_tree(self.current_path.clone()),
+                    scrollable::snap_to(Id::new("explorer"), RelativeOffset { x: 0.0, y: 0.0 }),
+                ])
             }
             Message::LoadTree(tree) => {
                 self.tree = Some(tree);
                 Task::none()
             }
-            Message::HighlightFile(item) => {
+            Message::SelectFile(item) => {
                 self.highlighted_file = Some(item.name.clone());
-                Task::none()
-            }
-            Message::OpenFile(item) => {
-                println!("Opening file: {:?}", item);
                 Task::none()
             }
             Message::EventOccurred(event) => {
@@ -131,15 +157,18 @@ impl Explorer {
             );
         }
 
-        row![
-            self.sidebar(),
-            column![
-                container(self.header())
-                    .width(self.width.unwrap_or(200.0) - 200.0),
-                scrollable(col.padding(5))
-                    .width(self.width.unwrap_or(200.0) - 200.0)
-                    .id(Id::new("explorer"))
-                    // .height(Length::Fill)
+        column![
+            self.titlebar(),
+            row![
+                self.sidebar(),
+                column![
+                    container(self.header())
+                        .width(self.width.unwrap_or(200.0) - 200.0),
+                    scrollable(col.padding(5))
+                        .width(self.width.unwrap_or(200.0) - 200.0)
+                        .id(Id::new("explorer"))
+                        // .height(Length::Fill)
+                ]
             ]
                 .spacing(5),
         ]
@@ -149,12 +178,17 @@ impl Explorer {
     }
 
     pub fn sidebar(&self) -> Element<Message> {
-        let sidebar = column![
-            text("Sidebar Item 1"),
-            text("Sidebar Item 2"),
-            text("Sidebar Item 3"),
-        ]
-            .spacing(10);
+        let mut sidebar = Column::new()
+            .spacing(5);
+
+        for item in Platform::special_dirs() {
+            sidebar = sidebar.push(
+                FileItem::new(item.clone())
+                    .on_select(Box::new(Message::SelectFile))
+                    .on_open(Box::new(Message::OpenFile))
+                    .sidebar()
+            );
+        }
 
         scrollable(sidebar)
             .width(200)
@@ -163,31 +197,48 @@ impl Explorer {
     }
 
     pub fn header(&self) -> Element<Message> {
-        column![
-            text(self.current_path.to_string_lossy().to_string()),
+        row![
+            Space::with_width(17),
+            text("Name")
+                .width(Length::FillPortion(4))
+                .size(14),
+            text("Size")
+                .width(Length::FillPortion(1))
+                .size(14),
+            text("Created at")
+                .width(Length::FillPortion(2))
+                .size(14),
+            text("Last Modified")
+                .width(Length::FillPortion(2))
+                .size(14),
+        ]
+            .spacing(5)
+            .padding([0, 5])
+            .into()
+    }
+
+    pub fn titlebar(&self) -> Element<Message> {
+        container(
             row![
-                Space::with_width(17),
-                text("Name")
-                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                    .width(Length::FillPortion(4))
-                    .size(14),
-                text("Size")
-                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                    .width(Length::FillPortion(1))
-                    .size(14),
-                text("Created at")
-                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                    .width(Length::FillPortion(2))
-                    .size(14),
-                text("Last Modified")
-                    .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                    .width(Length::FillPortion(2))
+                button("<")
+                    .on_press(Message::History(false))
+                    .padding(0)
+                    .style(button::text)
+                    .width(14),
+                button(">")
+                    .on_press(Message::History(true))
+                    .padding(0)
+                    .style(button::text)
+                    .width(14),
+                text(self.current_path.to_string_lossy())
+                    .width(Length::Fill)
                     .size(14),
             ]
                 .spacing(5)
-                .padding([0, 5])
-        ]
-            .spacing(5)
+                .padding(5)
+        )
+            .width(self.width.unwrap_or(200.0))
+            .height(30)
             .into()
     }
 

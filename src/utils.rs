@@ -78,3 +78,4 @@ pub fn file_type_from_extension(ext: &str) -> FileType {
         _ => FileType::Unknown,
     }
 }
+

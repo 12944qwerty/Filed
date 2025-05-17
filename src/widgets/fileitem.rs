@@ -1,6 +1,6 @@
-use std::{fs::DirEntry, path::PathBuf, time::SystemTime};
+use std::{path::PathBuf, time::SystemTime};
 
-use iced::{widget::{container, mouse_area, row, text, Image}, Color, Element, Length, Padding, Task};
+use iced::{widget::{container, mouse_area, row, text, Image, Row}, Color, Element, Length, Padding, Task};
 
 use crate::utils::{file_type_from_extension, image_from_type, readable_size, readable_time};
 use crate::views::explorer::Message;
@@ -29,12 +29,13 @@ pub struct FileData {
     pub file_type: Option<FileType>,
 }
 
+
+
 impl FileData {
-    pub fn new(entry: DirEntry) -> Self {
-        let path = entry.path();
+    pub fn new(path: PathBuf) -> Self {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let is_dir = entry.file_type().unwrap().is_dir();
-        let metadata = entry.metadata().unwrap();
+        let is_dir = path.is_dir();
+        let metadata = path.metadata().unwrap();
         let created = metadata.created().ok();
         let last_modified = metadata.modified().ok();
         let size = if is_dir { None } else { Some(metadata.len()) };
@@ -72,15 +73,24 @@ pub struct FileItem<Message> {
     highlighted: bool,
     on_select: Option<Box<dyn Fn(FileData) -> Message>>,
     on_open: Option<Box<dyn Fn(FileData) -> Message>>,
+
+    hide_name: bool,
+    hide_size: bool,
+    hide_created: bool,
+    hide_last_modified: bool,
 }
 
 impl FileItem<Message> {
-    pub fn new(entry: DirEntry) -> Self {
+    pub fn new(entry: PathBuf) -> Self {
         Self {
             data: FileData::new(entry),
             highlighted: false,
             on_select: None,
             on_open: None,
+            hide_name: false,
+            hide_size: false,
+            hide_created: false,
+            hide_last_modified: false,
         }
     }
 
@@ -90,6 +100,10 @@ impl FileItem<Message> {
             highlighted: false,
             on_select: None,
             on_open: None,
+            hide_name: false,
+            hide_size: false,
+            hide_created: false,
+            hide_last_modified: false,
         }
     }
 
@@ -100,34 +114,49 @@ impl FileItem<Message> {
     }
 
     pub fn view<'a>(self) -> Element<'a, Message> {
-        let mut row = mouse_area(
+        let mut data: Row<'a, Message> = Row::new().spacing(5);
+
+        data = data.push(
             container(
-                row![
-                    container(
-                        Image::new(image_from_type(self.data.clone().file_type.unwrap_or(FileType::Unknown)))
-                            .width(14)
-                            .height(14)
-                    )
-                        .padding(Padding::default().top(3)),
-                    text(format!("{}", self.data.name))
-                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                        .width(Length::FillPortion(4))
-                        .size(14),
-                    text(if !self.data.is_dir { readable_size(self.data.size.unwrap_or(0)) } else { "-".to_owned() })
-                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                        .width(Length::FillPortion(1))
-                        .size(14),
-                    text(readable_time(self.data.created))
-                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                        .width(Length::FillPortion(2))
-                        .size(14),
-                    text(readable_time(self.data.last_modified))
-                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.8))
-                        .width(Length::FillPortion(2))
-                        .size(14),
-                ]
-                    .spacing(5)
+                Image::new(image_from_type(self.data.clone().file_type.unwrap_or(FileType::Unknown)))
+                    .width(14)
+                    .height(14)
             )
+                .padding(Padding::default().top(3)),
+        );
+
+        if !self.hide_name {
+            data = data.push(
+                text(format!("{}", self.data.name))
+                    .width(Length::FillPortion(4))
+                    .size(14),
+            );
+        }
+        if !self.hide_size {
+            data = data.push(
+                text(if !self.data.is_dir { readable_size(self.data.size.unwrap_or(0)) } else { "-".to_owned() })
+                    .width(Length::FillPortion(1))
+                    .size(14),
+            );
+        }
+        if !self.hide_created {
+            data = data.push(
+                text(readable_time(self.data.created))
+                    .width(Length::FillPortion(2))
+                    .size(14),
+            );
+        }
+        if !self.hide_last_modified {
+            data = data.push(
+                text(readable_time(self.data.last_modified))
+                    .width(Length::FillPortion(2))
+                    .size(14),
+            );
+        }
+
+
+        let mut row = mouse_area(
+            container(data)
                 .padding(5)
                 .style(if self.highlighted {
                     |_: &_| iced::widget::container::Style {
@@ -145,7 +174,7 @@ impl FileItem<Message> {
         if let Some(msg) = self.on_select {
             row = row.on_press(msg(self.data.clone()));
         }
-        if let Some(msg) = self.on_open.as_ref() {
+        if let Some(msg) = self.on_open {
             row = row.on_double_click(msg(self.data.clone()));
         }
 
@@ -164,6 +193,13 @@ impl FileItem<Message> {
 
     pub fn on_open(mut self, msg: Box<dyn Fn(FileData) -> Message>) -> Self {
         self.on_open = Some(msg);
+        self
+    }
+
+    pub fn sidebar(mut self) -> Self {
+        self.hide_size = true;
+        self.hide_created = true;
+        self.hide_last_modified = true;
         self
     }
 }
@@ -189,6 +225,10 @@ where
             highlighted: false,
             on_select: None,
             on_open: None,
+            hide_name: false,
+            hide_size: false,
+            hide_created: false,
+            hide_last_modified: false,
         }
     }
 }

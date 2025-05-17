@@ -1,3 +1,4 @@
+mod platform;
 mod views;
 mod utils;
 mod widgets;
@@ -93,6 +94,6 @@ impl Filed {
     }
 
     fn theme(&self) -> Theme {
-        Theme::TokyoNight
+        Theme::Dracula
     }
 }
