@@ -1,7 +1,7 @@
 mod platform;
 mod views;
 mod utils;
-mod widgets;
+mod components;
 
 use iced::font::Font;
 use iced::widget::{row, text};

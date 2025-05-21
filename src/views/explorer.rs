@@ -1,11 +1,12 @@
 use std::path::{PathBuf};
 
+use iced::advanced::mouse;
 use iced::widget::button::Style;
 use iced::widget::scrollable::{Id, RelativeOffset};
-use iced::widget::{button, column, container, row, scrollable, text, Column, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Column, Space};
 use iced::{event, window, Color, Element, Event, Length, Size, Subscription, Task};
 
-use crate::widgets::fileitem::{FileItem, FileData};
+use crate::components::fileitem::{FileItem, FileData};
 use crate::platform::Platform;
 
 #[derive(Debug, Clone)]
@@ -17,6 +18,10 @@ pub enum Message {
     LoadTree(Vec<FileData>),
     EventOccurred(Event),
     WindowResized(Size),
+
+    ClickedOn(container::Id),
+
+    AddressbarChanged(String),
 }
 
 pub struct Explorer {
@@ -30,6 +35,9 @@ pub struct Explorer {
 
     history: Vec<PathBuf>,
     history_index: usize,
+
+    addressbar_focused: bool,
+    addressbar_content: String,
 }
 
 fn load_tree(path: PathBuf) -> Task<Message> {
@@ -62,6 +70,8 @@ impl Explorer {
                 height: None,
                 history: vec![Platform::home_dir()],
                 history_index: 0,
+                addressbar_focused: false,
+                addressbar_content: "".to_string(),
             },
             Task::batch(vec![
                 window::get_oldest().and_then(window::get_size).map(|size| {
@@ -121,6 +131,7 @@ impl Explorer {
                 Task::none()
             }
             Message::SelectFile(item) => {
+                self.addressbar_focused = false;
                 self.highlighted_file = Some(item.name.clone());
                 Task::none()
             }
@@ -130,12 +141,29 @@ impl Explorer {
                         println!("Window close requested");
                         Task::none()
                     }
+                    Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                        println!("Clicked somewhere");
+                        self.addressbar_focused = false;
+                        Task::none()
+                    }
                     _ => Task::none(),
                 }
             }
             Message::WindowResized(size) => {
                 self.width = Some(size.width);
                 self.height = Some(size.height);
+                Task::none()
+            }
+            Message::ClickedOn(id) => {
+                if id == "addressbar".into() {
+                    self.addressbar_focused = true;
+                    return text_input::focus("addressbar_inp");
+                }
+                Task::none()
+            }
+            Message::AddressbarChanged(content) => {
+                println!("Addressbar changed: {}", content.clone());
+                self.addressbar_content = content;
                 Task::none()
             }
         }
@@ -158,15 +186,15 @@ impl Explorer {
         }
 
         column![
-            self.titlebar(),
+            self.header(),
             row![
                 self.sidebar(),
                 column![
-                    container(self.header())
+                    container(self.tableheader())
                         .width(self.width.unwrap_or(200.0) - 200.0),
                     scrollable(col.padding(5))
                         .width(self.width.unwrap_or(200.0) - 200.0)
-                        .id(Id::new("explorer"))
+                        .id("explorer")
                         // .height(Length::Fill)
                 ]
             ]
@@ -196,7 +224,7 @@ impl Explorer {
             .into()
     }
 
-    pub fn header(&self) -> Element<Message> {
+    pub fn tableheader(&self) -> Element<Message> {
         row![
             Space::with_width(17),
             text("Name")
@@ -217,7 +245,7 @@ impl Explorer {
             .into()
     }
 
-    pub fn titlebar(&self) -> Element<Message> {
+    pub fn header(&self) -> Element<Message> {
         container(
             row![
                 button("<")
@@ -230,9 +258,8 @@ impl Explorer {
                     .padding(0)
                     .style(button::text)
                     .width(14),
-                text(self.current_path.to_string_lossy())
-                    .width(Length::Fill)
-                    .size(14),
+                self.addressbar(),
+                // todo search
             ]
                 .spacing(5)
                 .padding(5)
@@ -240,6 +267,32 @@ impl Explorer {
             .width(self.width.unwrap_or(200.0))
             .height(30)
             .into()
+    }
+
+    pub fn addressbar(&self) -> Element<Message> {
+        if !self.addressbar_focused {
+            container(
+                button(text(self.current_path.to_string_lossy().to_string()))
+                    .width(Length::Fill)
+                    .padding(0)
+                    .on_press(Message::ClickedOn("addressbar".into()))
+                    .style(button::text),
+            )
+                .padding(0)
+                .height(30)
+                .id("addressbar")
+                .into()
+        } else {
+            container(
+                text_input("Addressbar", &self.addressbar_content)
+                    .on_input(Message::AddressbarChanged)
+                    .size(18)
+                    .id("addressbar_inp")
+            )
+                // .padding(0)
+                .height(30)
+                .into()
+        }
     }
 
     pub fn title(&self) -> String {
