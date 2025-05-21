@@ -1,10 +1,11 @@
 use std::path::{PathBuf};
 
-use iced::advanced::mouse;
+use iced::advanced::{mouse, widget::operation};
 use iced::widget::button::Style;
 use iced::widget::scrollable::{Id, RelativeOffset};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Column, Space};
-use iced::{event, window, Color, Element, Event, Length, Size, Subscription, Task};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text, text_input, Column, Space};
+use iced::{event, window, Color, Element, Event, Length, Padding, Pixels, Size, Subscription, Task};
+use iced_runtime::{Action, task};
 
 use crate::components::fileitem::{FileItem, FileData};
 use crate::platform::Platform;
@@ -22,6 +23,7 @@ pub enum Message {
     ClickedOn(container::Id),
 
     AddressbarChanged(String),
+    DirChanged,
 }
 
 pub struct Explorer {
@@ -156,15 +158,34 @@ impl Explorer {
             }
             Message::ClickedOn(id) => {
                 if id == "addressbar".into() {
+                    self.addressbar_content = self.current_path.to_string_lossy().to_string();
                     self.addressbar_focused = true;
-                    return text_input::focus("addressbar_inp");
+                    return text_input::focus("addressbar_inp").then(|_: Task<Message>| Task::from(text_input::select_all("addressbar_inp")));
                 }
                 Task::none()
             }
             Message::AddressbarChanged(content) => {
-                println!("Addressbar changed: {}", content.clone());
+                // println!("Addressbar changed: {}", content.clone());
                 self.addressbar_content = content;
                 Task::none()
+            }
+            Message::DirChanged => {
+                if self.addressbar_content.is_empty() {
+                    return task::effect(Action::widget(operation::focusable::unfocus()));
+                }
+                let path = PathBuf::from(self.addressbar_content.clone());
+                if path.exists() {
+                    self.current_path = path;
+                    self.history.truncate(self.history_index + 1);
+                    self.history.push(self.current_path.clone());
+                    self.history_index += 1;
+                    self.addressbar_focused = false;
+                    return Task::batch(vec![
+                        load_tree(self.current_path.clone()),
+                        task::effect(Action::widget(operation::focusable::unfocus())),
+                    ]);
+                }
+                task::effect(Action::widget(operation::focusable::unfocus()))
             }
         }
     }
@@ -248,49 +269,60 @@ impl Explorer {
     pub fn header(&self) -> Element<Message> {
         container(
             row![
-                button("<")
-                    .on_press(Message::History(false))
+                container(
+                    button(
+                        text("<").size(20).height(Length::Fill)
+                    )
+                        .padding(Padding::new(0.0).top(1))
+                        .style(button::text)
+                        .on_press(Message::History(false))
+                )
                     .padding(0)
-                    .style(button::text)
-                    .width(14),
-                button(">")
-                    .on_press(Message::History(true))
+                    .width(20),
+                container(
+                    button(
+                        text(">").size(20).height(Length::Fill)
+                    )
+                        .padding(Padding::new(0.0).top(1))
+                        .style(button::text)
+                        .on_press(Message::History(true))
+                )
                     .padding(0)
-                    .style(button::text)
-                    .width(14),
+                    .width(20),
                 self.addressbar(),
                 // todo search
             ]
                 .spacing(5)
                 .padding(5)
+                .height(Length::Fill)
         )
             .width(self.width.unwrap_or(200.0))
-            .height(30)
+            .height(40)
             .into()
     }
 
     pub fn addressbar(&self) -> Element<Message> {
         if !self.addressbar_focused {
             container(
-                button(text(self.current_path.to_string_lossy().to_string()))
-                    .width(Length::Fill)
-                    .padding(0)
+                button(
+                    text(self.current_path.to_string_lossy().to_string()).width(Length::Fill)
+                )
+                    .padding(Padding::default().top(4))
+                    .style(button::text)
                     .on_press(Message::ClickedOn("addressbar".into()))
-                    .style(button::text),
+                    .width(Length::Fill)
             )
-                .padding(0)
-                .height(30)
+                .width(Length::Fill)
                 .id("addressbar")
                 .into()
         } else {
             container(
-                text_input("Addressbar", &self.addressbar_content)
+                text_input(Platform::home_dir().to_string_lossy().as_ref(), &self.addressbar_content)
                     .on_input(Message::AddressbarChanged)
-                    .size(18)
+                    .on_submit(Message::DirChanged)
                     .id("addressbar_inp")
             )
-                // .padding(0)
-                .height(30)
+                .width(Length::Fill)
                 .into()
         }
     }

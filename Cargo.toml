@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = { version = "0.4", features = ["clock"] }
 iced = { features = ["lazy", "tokio", "wgpu", "image", "advanced"], git = "https://github.com/iced-rs/iced.git", rev = "d39022432c778a8cda455f40b9c12245db86ce45"}
+iced_runtime = { git = "https://github.com/iced-rs/iced.git", rev = "d39022432c778a8cda455f40b9c12245db86ce45" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rayon = "1.7.0"
