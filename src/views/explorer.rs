@@ -10,6 +10,14 @@ use iced_runtime::{Action, task};
 use crate::components::fileitem::{FileItem, FileData};
 use crate::platform::Platform;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortBy {
+    Name,
+    Size,
+    CreatedAt,
+    LastModified,
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     SelectFile(FileData),
@@ -17,6 +25,7 @@ pub enum Message {
     History(bool),
 
     LoadTree(Vec<FileData>),
+    SortTree(SortBy),
     EventOccurred(Event),
     WindowResized(Size),
 
@@ -29,6 +38,9 @@ pub enum Message {
 pub struct Explorer {
     current_path: PathBuf,
     tree: Option<Vec<FileData>>,
+
+    sortby: SortBy,
+    sort_ascending: bool,
 
     highlighted_file: Option<String>,
 
@@ -45,17 +57,13 @@ pub struct Explorer {
 fn load_tree(path: PathBuf) -> Task<Message> {
     Task::perform(
         async {
-            let mut files = std::fs::read_dir(path)
+            std::fs::read_dir(path)
                 .ok()
                 .into_iter()
                 .flatten()
                 .filter_map(Result::ok)
                 .map(|e| { FileData::new(e.path()) })
-                .collect::<Vec<_>>();
-            files
-                .sort_by_key(|i| !i.is_dir);
-
-            files
+                .collect::<Vec<_>>()
         },
         Message::LoadTree
     )
@@ -70,6 +78,8 @@ impl Explorer {
                 highlighted_file: None,
                 width: None,
                 height: None,
+                sortby: SortBy::Name,
+                sort_ascending: true,
                 history: vec![Platform::home_dir()],
                 history_index: 0,
                 addressbar_focused: false,
@@ -128,7 +138,32 @@ impl Explorer {
                     scrollable::snap_to(Id::new("explorer"), RelativeOffset { x: 0.0, y: 0.0 }),
                 ])
             }
-            Message::LoadTree(tree) => {
+            Message::LoadTree(mut tree) => {
+                self.sortby = SortBy::Name;
+                self.sort_ascending = true;
+                
+                tree.sort_by_key(|i| !i.is_dir);
+                self.tree = Some(tree);
+                Task::none()
+            }
+            Message::SortTree(by) => {
+                if self.tree.is_none() {
+                    return Task::none();
+                }
+                self.sortby = by.clone();
+                self.sort_ascending = !self.sort_ascending;
+
+                let mut tree = self.tree.clone().unwrap_or(vec![]);
+                match by {
+                    SortBy::Name => tree.sort_by_key(|i| i.name.clone().to_lowercase()),
+                    SortBy::Size => tree.sort_by_key(|i| i.size.unwrap_or(0)),
+                    SortBy::CreatedAt => tree.sort_by_key(|i| i.created.unwrap_or(std::time::SystemTime::now())),
+                    SortBy::LastModified => tree.sort_by_key(|i| i.last_modified.unwrap_or(std::time::SystemTime::now())),
+                }
+                tree.sort_by_key(|i| !i.is_dir);
+                if !self.sort_ascending {
+                    tree.reverse();
+                }
                 self.tree = Some(tree);
                 Task::none()
             }
@@ -213,9 +248,9 @@ impl Explorer {
                 column![
                     container(self.tableheader())
                         .width(self.width.unwrap_or(200.0) - 200.0),
-                    scrollable(col.padding(5))
+                    scrollable(col)
                         .width(self.width.unwrap_or(200.0) - 200.0)
-                        .id("explorer")
+                        .id("explorer"),
                         // .height(Length::Fill)
                 ]
             ]
@@ -246,23 +281,39 @@ impl Explorer {
     }
 
     pub fn tableheader(&self) -> Element<Message> {
+        let arrow = |column| {
+            if self.sortby == column {
+                if self.sort_ascending { "⏶" } else { "⏷" }
+            } else {
+                ""
+            }
+        };
+
         row![
-            Space::with_width(17),
-            text("Name")
-                .width(Length::FillPortion(4))
-                .size(14),
-            text("Size")
-                .width(Length::FillPortion(1))
-                .size(14),
-            text("Created at")
-                .width(Length::FillPortion(2))
-                .size(14),
-            text("Last Modified")
-                .width(Length::FillPortion(2))
-                .size(14),
+            Space::with_width(18),
+            button(text(format!("Name {}", arrow(SortBy::Name))).size(14).shaping(text::Shaping::Advanced))
+                .on_press(Message::SortTree(SortBy::Name))
+                .padding(0)
+                .style(button::text)
+                .width(Length::FillPortion(4)),
+            button(text(format!("Size {}", arrow(SortBy::Size))).size(14).shaping(text::Shaping::Advanced))
+                .on_press(Message::SortTree(SortBy::Size))
+                .padding(0)
+                .style(button::text)
+                .width(Length::FillPortion(1)),
+            button(text(format!("Created At {}", arrow(SortBy::CreatedAt))).size(14).shaping(text::Shaping::Advanced))
+                .on_press(Message::SortTree(SortBy::CreatedAt))
+                .padding(0)
+                .style(button::text)
+                .width(Length::FillPortion(2)),
+            button(text(format!("Last Modified {}", arrow(SortBy::LastModified))).size(14).shaping(text::Shaping::Advanced))
+                .on_press(Message::SortTree(SortBy::LastModified))
+                .padding(0)
+                .style(button::text)
+                .width(Length::FillPortion(2)),
         ]
             .spacing(5)
-            .padding([0, 5])
+            .padding(5)
             .into()
     }
 

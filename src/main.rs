@@ -16,7 +16,10 @@ pub fn main() -> iced::Result {
         .title(Filed::title)
         .theme(Filed::theme)
         .settings(iced::Settings {
-            default_font: Font::with_name("Fantasy"),
+            fonts: vec![
+                std::borrow::Cow::Borrowed(include_bytes!("../resources/notosans.ttf")),
+            ],
+            default_font: Font::with_name("Noto Sans"),
             ..iced::Settings::default()
         })
         .run()

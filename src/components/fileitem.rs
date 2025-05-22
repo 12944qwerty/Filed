@@ -119,10 +119,10 @@ impl FileItem<Message> {
         data = data.push(
             container(
                 Image::new(image_from_type(self.data.clone().file_type.unwrap_or(FileType::Unknown)))
-                    .width(14)
-                    .height(14)
+                    .width(18)
+                    .height(18)
             )
-                .padding(Padding::default().top(3)),
+                .padding(0),
         );
 
         if !self.hide_name {
